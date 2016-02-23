@@ -1,0 +1,127 @@
+#cloud-config
+
+# todo replace 10.0.0.4 with COREOS_PRIVATE_IPV4 but use the envvar file  https://coreos.com/os/docs/latest/using-environment-variables-in-systemd-units.html
+
+write_files:
+  - path: /etc/flannel/options.env
+    permissions: 0644
+    owner: core:core
+    content: |
+      FLANNELD_IFACE=$private_ipv4
+      FLANNELD_ETCD_ENDPOINTS=http://10.0.3.4:2379,http://10.0.4.4:2379,http://10.0.5.4:2379
+  - path: /etc/systemd/system/kubelet.service
+    permissions: 0644
+    owner: core:core
+    content: |
+      [Unit]
+      Requires=kubelet-install.service docker.service
+      After=kubelet-install.service docker.service
+      [Service]
+      ExecStart=/opt/bin/kubelet \
+        --api_servers=https://kubernetes-api-server-elb-1459328766.us-east-1.elb.amazonaws.com \
+        --register-node=true \
+        --allow-privileged=true \
+        --config=/etc/kubernetes/manifests \
+        --hostname-override=$private_ipv4 \
+        --cluster-dns=192.168.0.10 \
+        --cluster-domain=cluster.local \
+        --kubeconfig=/etc/kubernetes/worker-kubeconfig.yaml \
+        --tls-cert-file=/etc/kubernetes/ssl/worker.pem \
+        --tls-private-key-file=/etc/kubernetes/ssl/worker-key.pem
+      Restart=always
+      RestartSec=10
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/kubernetes/manifests/kube-proxy.yaml
+    permissions: 0644
+    owner: core:core
+    content: |
+      apiVersion: v1
+      kind: Pod
+      metadata:
+        name: kube-proxy
+        namespace: kube-system
+      spec:
+        hostNetwork: true
+        containers:
+        - name: kube-proxy
+          image: gcr.io/google_containers/hyperkube:v1.1.2
+          command:
+          - /hyperkube
+          - proxy
+          - --master=https://10.0.0.4
+          - --kubeconfig=/etc/kubernetes/worker-kubeconfig.yaml
+          - --proxy-mode=iptables
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - mountPath: /etc/ssl/certs
+              name: "ssl-certs"
+            - mountPath: /etc/kubernetes/worker-kubeconfig.yaml
+              name: "kubeconfig"
+              readOnly: true
+            - mountPath: /etc/kubernetes/ssl
+              name: "etc-kube-ssl"
+              readOnly: true
+        volumes:
+          - name: "ssl-certs"
+            hostPath:
+              path: "/usr/share/ca-certificates"
+          - name: "kubeconfig"
+            hostPath:
+              path: "/etc/kubernetes/worker-kubeconfig.yaml"
+          - name: "etc-kube-ssl"
+            hostPath:
+              path: "/etc/kubernetes/ssl"
+  - path: /etc/kubernetes/worker-kubeconfig.yaml
+    permissions: 0644
+    owner: core:core
+    content: |
+      apiVersion: v1
+      kind: Config
+      clusters:
+      - name: local
+        cluster:
+          certificate-authority: /etc/kubernetes/ssl/ca.pem
+      users:
+      - name: kubelet
+        user:
+          client-certificate: /etc/kubernetes/ssl/worker.pem
+          client-key: /etc/kubernetes/ssl/worker-key.pem
+      contexts:
+      - context:
+          cluster: local
+          user: kubelet
+        name: kubelet-context
+      current-context: kubelet-context
+coreos:
+  units:
+    - name: flanneld.service
+      command: start
+      drop-ins:
+        - name: 40-ExecStartPre-symlink.conf
+          content: |
+            [Service]
+            ExecStartPre=/usr/bin/ln -sf /etc/flannel/options.env /run/flannel/options.env
+    - name: docker.service
+      command: start
+      drop-ins:
+        - name: 40-flannel.conf
+          content: |
+            [Unit]
+            Requires=flanneld.service
+            After=flanneld.service
+    - name: kubelet-install.service
+      command: start
+      content: |
+        [Unit]
+        Description=Install kubelet
+        Documentation=http://kubernetes.io/v1.0/docs/admin/kubelet.html
+        [Service]
+        ExecStart=/usr/bin/mkdir -p /opt/bin
+        ExecStart=/usr/bin/bash -c '/usr/bin/curl -sfL https://storage.googleapis.com/kubernetes-release/release/`/usr/bin/curl -sfL https://storage.googleapis.com/kubernetes-release/release/stable.txt`/bin/linux/amd64/kubelet -o /opt/bin/kubelet'
+        ExecStart=/usr/bin/chmod +x /opt/bin/kubelet
+        RemainAfterExit=yes
+        Type=oneshot
+    - name: kubelet.service
+      command: start

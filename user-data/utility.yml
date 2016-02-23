@@ -1,0 +1,73 @@
+#cloud-config
+
+write_files:
+  - path: /etc/ssh/sshd_config
+    permissions: 0600
+    owner: root:root
+    content: |
+      # Use most defaults for sshd configuration.
+      UsePrivilegeSeparation sandbox
+      Subsystem sftp internal-sftp
+
+      PermitRootLogin no
+      AllowUsers core
+      PasswordAuthentication no
+      ChallengeResponseAuthentication no
+  - path: /home/core/prometheus.yml
+    permissions: 0644
+    owner: core:core
+    content: |
+      global:
+        scrape_interval:     15s # By default, scrape targets every 15 seconds.
+        evaluation_interval: 15s # By default, scrape targets every 15 seconds.
+        # scrape_timeout is set to the global default (10s).
+
+        # Attach these extra labels to all timeseries collected by this Prometheus instance.
+        external_labels:
+          monitor: 'codelab-monitor'
+
+      scrape_configs:
+        - job_name:       'etcd'
+
+          # Override the global default and scrape targets from this job every 5 seconds.
+          scrape_interval: 5s
+          scrape_timeout: 10s
+
+          target_groups:
+            - targets: ['10.0.3.4:2379', '10.0.4.4:2379', '10.0.5.4:2379']
+coreos:
+  etcd2:
+    proxy: on
+    initial-cluster: etcd0=http://10.0.3.4:2380,etcd1=http://10.0.4.4:2380,etcd2=http://10.0.5.4:2380
+    listen-client-urls: http://127.0.0.1:2379,http://127.0.0.1:4001
+  units:
+    # todo: does the utility server need to be an etcd proxy? should it be?
+    - name: etcd2.service
+      command: start
+    - name: "prometheus.service"
+      command: "start"
+      content: |
+        [Unit]
+        Description=Prometheus
+        After=docker.service etcd2.service
+        Requires=docker.service etcd2.service
+        [Service]
+        TimeoutStartSec=0
+        ExecStart=/usr/bin/docker run \
+                                      -p 9090:9090 \
+                                      -v /home/core/prometheus.yml:/etc/prometheus/prometheus.yml \
+                                      prom/prometheus
+        [Install]
+        WantedBy=multi-user.target
+    - name: kubectl-install.service
+      command: start
+      content: |
+        [Unit]
+        Description=Install kubectl (Kubernetes Cluster Manager)
+        Documentation=https://cloud.google.com/container-engine/docs/kubectl/
+        [Service]
+        ExecStart=/usr/bin/mkdir -p /opt/bin
+        ExecStart=/usr/bin/bash -c '/usr/bin/curl -sfL https://storage.googleapis.com/kubernetes-release/release/`/usr/bin/curl -sfL https://storage.googleapis.com/kubernetes-release/release/stable.txt`/bin/linux/amd64/kubectl -o /opt/bin/kubectl'
+        ExecStart=/usr/bin/chmod +x /opt/bin/kubectl
+        RemainAfterExit=yes
+        Type=oneshot

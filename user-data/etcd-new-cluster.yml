@@ -1,0 +1,26 @@
+#cloud-config
+
+coreos:
+  etcd2:
+    # New clusters should use the discovery service to connect.
+    # Do not use the discovery service to add a new member to an existing cluster, see `etcd-existing-cluster.yml`.
+    # Generate a discovery URL for each unique cluster from https://discovery.etcd.io/new?size=3
+    discovery: https://discovery.etcd.io/5a0589bcc47be5cde34158f553dced0f
+    # multi-region deployments, multi-cloud deployments, and Droplets without
+    # private networking need to use $public_ipv4:
+    advertise-client-urls: http://$private_ipv4:2379,http://$private_ipv4:4001
+    initial-advertise-peer-urls: http://$private_ipv4:2380
+    # listen on the official ports 2379, 2380 and one legacy port 4001:
+    listen-client-urls: http://0.0.0.0:2379,http://0.0.0.0:4001
+    listen-peer-urls: http://$private_ipv4:2380
+  fleet:
+    public-ip: $private_ipv4   # used for fleetctl ssh command
+    # Give these instances a Fleet role in case we want to boot systemd
+    # units onto them based on this label.
+    metadata: role=etcd
+    etcd-servers: https://127.0.0.1:2379
+  units:
+    - name: etcd2.service
+      command: start
+    - name: fleet.service
+      command: start

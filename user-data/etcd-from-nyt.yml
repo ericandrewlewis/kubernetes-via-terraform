@@ -1,0 +1,44 @@
+#cloud-config
+
+# Todo maybe revisit to add HTTPS connections to etcd
+coreos:
+locksmith:
+endpoint: http://127.0.0.1:2379
+# etcd_cafile: /etc/ssl/etcd/ca.pem
+# etcd_certfile: /etc/ssl/etcd/cert.pem
+# etcd_keyfile: /etc/ssl/etcd/key.pem
+update:
+group: stable
+reboot-strategy: best-effort
+etcd2:
+# discovery: https://discovery.etcd.io/d94d7b6db33f56db057e85f2646e721f
+# initial-advertise-peer-urls: http://$private_ipv4:2380
+advertise-client-urls: http://$private_ipv4:2379
+listen-client-urls: http://0.0.0.0:2379
+# listen-peer-urls: http://$private_ipv4:2380
+# client-cert-auth: true
+# trusted-ca-file: /etc/etcd/ssl/ca.pem
+# cert-file: /etc/etcd/ssl/etcd-cert.pem
+# key-file: /etc/etcd/ssl/etcd-key.pem
+# peer-client-cert-auth: true
+# peer-trusted-ca-file: /etc/etcd/ssl/ca.pem
+# peer-cert-file: /etc/etcd/ssl/etcd-cert.pem
+# peer-key-file: /etc/etcd/ssl/etcd-key.pem
+fleet:
+metadata: role=etcd
+etcd-servers: http://127.0.0.1:2379
+# etcd_cafile: /etc/ssl/etcd/ca.pem
+# etcd_certfile: /etc/ssl/etcd/cert.pem
+# etcd_keyfile: /etc/ssl/etcd/key.pem
+units:
+- name: etcd2.service
+command: start
+drop-ins:
+  - name: 50-cpu.conf
+    content: |
+      [Service]
+      Environment="GOMAXPROCS=2"
+- name: docker.service
+command: start
+- name: fleet.service
+command: start
