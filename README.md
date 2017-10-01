@@ -1,4 +1,4 @@
-#
+# This setup is rather old and may not work.
 
 This will boot up a Kubernetes cluster in AWS.
 
